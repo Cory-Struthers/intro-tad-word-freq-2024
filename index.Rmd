@@ -1,0 +1,216 @@
+---
+title: "Word Frequencies"
+subtitle: "Introduction to Text as Data"
+author: "Amber Boydstun & Cory Struthers"
+date: "January 25-27, 2024"
+output:
+  html_document:
+    toc: yes
+    df_print: paged
+  html_notebook:
+    code_folding: show
+    highlight: tango
+    theme: united
+    toc: yes
+    df_print: paged
+---
+
+
+```{r setup, include=FALSE} 
+knitr::opts_chunk$set(warning = FALSE, message = FALSE) 
+knitr::opts_knit$set(root.dir = "~/Dropbox/text-as-data-JUST-CORY-AND-AMBER/modules_2024/data")
+```
+
+
+### Introduction
+
+The bag of words model is the prevailing approach to text representation. The fundamental concept is straightforward: we represent each document by a count of how many times each word appears in it. Think of taking all the words in a given document (or set of documents) and shaking them all up in a bag so they are no longer in order.
+\
+
+<center>![](/Users/cstruth/Dropbox/text-as-data-JUST-CORY-AND-AMBER/modules_2024/images/bag of words.png){width="70%"}</center>
+
+\
+
+We'll demonstrate word frequencies with an example using (what was once) Twitter data. During the 2016 presidential election campaigns, people noticed that when presidential candidate Donald Trump posted positive tweets, they came from an iPhone. When he posted negative and angrier tweets, they came from an Android. Some speculated that Trump's Android and iPhone tweets were written by different people. 
+
+We'll explore this possibility using [Twitter data collected from David Robinson](http://varianceexplained.org/r/trump-tweets/) to examine which words were most common among different phone types. 
+
+In this module, we'll need the following packages:
+
+``` {r, results = 'hide', message = FALSE}
+
+# Load packages
+require(tidyverse)
+require(quanteda)
+require(quanteda.textstats)
+require(quanteda.textplots)
+library(stringr)
+library(ggplot2)
+library(ggpubr)
+
+# Set working directory
+setwd("~/Dropbox/text-as-data-JUST-CORY-AND-AMBER/modules_2024/data/")
+getwd() # view working directory
+
+```
+
+After importing the data from Robinson's website, we added a new variable that indicates whether the tweet was generated from an iPhone or Android.
+
+We then converted the text to a corpus.
+
+First, we turn the corpus into a tokens object.
+
+```{r, message=F}
+
+# Read in corpus
+trump_tweets_corp = readRDS("trump_tweet_corp.rds")
+head(docvars(trump_tweets_corp),10)
+
+# Transform to tokens
+trump_tweet_toks = trump_tweets_corp  %>%
+    tokens(remove_punct = TRUE, 
+           remove_numbers = TRUE, 
+           remove_symbols = TRUE, 
+           remove_url = TRUE) %>% 
+    tokens_tolower() %>%
+    tokens_remove(stopwords("english")) 
+
+# Add collocations
+trump_tweet_coll = textstat_collocations(trump_tweet_toks, size = 2:3, min_count = 10)
+trump_tweet_coll
+
+# Add to tokens document
+trump_toks_all =  tokens_compound(trump_tweet_toks, trump_tweet_coll, concatenator = " ") %>%
+    tokens_select(padding=FALSE) %>% # remove padding
+    tokens_wordstem # stem words after adding collocations
+tail(trump_toks_all)
+
+```
+
+### Create document frequency matrix (DFM)
+
+After tokenization, we move to the next step. We use `dfm()` to convert the corpus of documents to a document-feature matrix (DFM), which is essentially a massive table where every row is a document in the corpus and every column is a token (recall, word or phrase). 
+
+The values in the cells show the number of times a token appears in the document.
+
+```{r, message=F}
+
+# Create a document-feature matrix
+trump_tweet_dfm = dfm(trump_toks_all)
+trump_tweet_dfm
+    
+# Number of features (i.e., unique tokens)
+nfeat(trump_tweet_dfm)
+
+# Examine sums across documents
+head(colSums(trump_tweet_dfm),50)
+
+```
+
+Some dfms are very large, involving hundreds of thousands of documents and millions of features. Features within those documents may be used rarely across the whole corpus, or used many times but only in a single document. Many text analysis methods do not infer meaning from terms mentioned very few times, and retaining all terms in really large corpora increases computational complexity.
+
+Thus, the researcher can "trim" the dfm to exclude infrequent terms using `dfm_trim`. When used appropriately, trimming can decrease processing time without losing quality. In fact, reducing _sparseness_ or _sparsity_ in the matrix (i.e., the proportion of cells that have zero counts) is particularly important for more complex computational tasks in order to avoid over-fitting and using memory.
+
+* `min_termfreq` removes any features that occur less than _n_ times in the corpus (no matter the distribution across documents).
+* `min_docfreq` removes any features that occur in less than _n_ times across _documents_. 
+* `docfreq_type` (an option) specifies a count or proportion.
+
+```{r, message=F}
+
+# Pipe grouping through trimming step
+trump_tweet_dfm_trim = dfm(trump_tweet_dfm) %>% 
+                       dfm_trim(min_termfreq = 10, min_docfreq = 10, docfreq_type = "count") %>% 
+                       dfm_group(groups = source)
+print(trump_tweet_dfm_trim)
+
+```
+Depending on the question, ubiquitous terms can also have little meaning. `quanteda` offers a `max` equivalent of the above but we don't suggest using it as often, in part because common terms may not be distributed evenly across groups we care about.
+
+
+### Calculate basic word frequencies
+
+The `textstat_frequency()` function in `quanteda.textstats package` is a useful function for calculating term frequencies in a corpus of text data. In addition to providing feature counts, it ranks features and provides each feature's document frequency. 
+
+Note that you must use `group` to get group-level frequencies when you apply `textstat_frequency`. 
+
+```{r, message=F, fig.align='center', fig.width=10, fig.height=10}
+
+trump_tweet_words_freq = dfm(trump_tweet_dfm_trim) %>%
+    textstat_frequency(groups = source) # Grouping the term frequencies by source
+head(trump_tweet_words_freq)
+
+```
+
+### Visualizing word frequencies
+
+After trimming (as appropriate), we can use the `textplot_wordcloud` function to create wordcloud of the trimmed dfm.
+
+```{r, message=F}
+
+set.seed(132) # Set seed so figure can be reproduced
+textplot_wordcloud(trump_tweet_dfm_trim, comparison = TRUE, max_words = 250, color = c("coral","dodgerblue"), min_size=0.9)
+
+```
+
+Let's also plot the count of the top 15 most frequent words used in Trump's tweets from Android and from iPhone.
+
+```{r, warning=FALSE, message=FALSE, fig.align='center', fig.width=8, fig.height=6}
+
+# First create dfs with top 15 features
+android15_df = trump_tweet_words_freq %>%
+    filter(group == "Android") %>%
+    head(15) 
+iphone15_df = trump_tweet_words_freq %>%
+    filter(group == "iPhone") %>%
+    head(15) 
+
+# Plot and arrange side by side
+android15_plot = ggplot(data = android15_df, aes(x = reorder(feature, frequency), y = frequency)) +
+    geom_col(stat = "identity", alpha = 0.8, fill = "coral",
+             position = position_dodge(width = 0.8)) +
+    scale_y_continuous(limits = c(0, 200)) +
+    xlab("Frequency") + ylab("") +
+    ggtitle("Android") +
+    coord_flip() +
+    theme_bw()
+
+iphone15_plot = ggplot(data = iphone15_df, aes(x = reorder(feature, frequency), y = frequency)) +
+    geom_col(stat = "identity", alpha = 0.8, fill = "dodgerblue",
+             position = position_dodge(width = 0.8)) +
+    scale_y_continuous(limits = c(0, 200)) +
+    xlab("Frequency") + ylab("") +
+    ggtitle("iPhone") +
+    coord_flip() +
+    theme_bw()
+
+ggpubr::ggarrange(android15_plot, iphone15_plot) %>%
+  annotate_figure(top = text_grob("Top terms in Trump's Android and iPhone Tweets",  size = 14))
+
+```
+
+By plotting the top 15 most frequent words used from Trump's Android and iPhone, we can see that "crooked hillary clinton" and "bad" is mentioned more often in Android tweets than iPhone tweets. We also observe features like "#trump2016", "#makeamericagreatagain", and "support", which have more positive implications.
+
+
+\
+
+### Homework
+
+---
+
+#### Discussion Question:
+
+Say you had ten poems, five describing the winter season and five describing the summer. The words "snow" and "cold" appear a handful of times in the winter poems and not at all in the summer poems. Imagine the result of the word frequency measure we've constructed in this module. Would the result adequately capture the importance of the words "cold" and "snow" to the winter concept?
+
+\
+
+#### Coding Question:
+
+1. Generate a list of the top terms/concepts in the immigration twitter data you tokenized from the pre-processing module, by year.
+2. Create a word cloud of top terms representing each year. Do they seem to change once Trump takes office in 2017?
+
+
+---
+
+\
+
+
