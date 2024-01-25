@@ -73,17 +73,17 @@ trump_tweet_toks = trump_tweets_corp  %>%
            remove_symbols = TRUE, 
            remove_url = TRUE) %>% 
     tokens_tolower() %>%
-    tokens_remove(stopwords("english")) 
+    tokens_remove(stopwords("english"), padding=TRUE) 
 
-# Add collocations
+# Find collocations
 trump_tweet_coll = textstat_collocations(trump_tweet_toks, size = 2:3, min_count = 10)
 trump_tweet_coll
 
-# Add to tokens document
+# Add collocations to existing tokens document
 trump_toks_all =  tokens_compound(trump_tweet_toks, trump_tweet_coll, concatenator = " ") %>%
     tokens_select(padding=FALSE) %>% # remove padding
     tokens_wordstem # stem words after adding collocations
-tail(trump_toks_all)
+tail(trump_toks_all,15)
 
 ```
 
